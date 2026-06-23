@@ -1888,7 +1888,7 @@ function GapEditor({
           <Button size="sm" variant="outline" className="h-7 text-xs cursor-pointer" onClick={() => setIsEditing(false)}>
             Cancel
           </Button>
-          <Button size="sm" className="h-7 text-xs cursor-pointer" onClick={handleSaveEdit} disabled={!editField.trim()}>
+          <Button size="sm" className="h-7 text-xs cursor-pointer" onClick={handleSaveEdit} disabled={!String(editField ?? "").trim()}>
             Save Changes
           </Button>
         </div>
@@ -1981,7 +1981,7 @@ function GapEditor({
         />
         <Button
           size="sm"
-          variant={localVal.trim() ? "default" : "secondary"}
+          variant={String(localVal ?? "").trim() ? "default" : "secondary"}
           className="h-8 shrink-0 cursor-pointer"
           onClick={() => onResolve(localVal)}
         >

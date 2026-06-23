@@ -445,10 +445,10 @@ function mapAgentLog(log: DocumentData[]): AgentLogEntry[] {
 
 function mapGaps(gaps: DocumentData[]): GapEntry[] {
   return gaps.map((gap) => ({
-    field: gap.field ?? "unknownField",
-    reason: gap.reason ?? "RequiresInput",
-    suggestion: gap.suggestion ?? "",
-    resolvedValue: gap.resolvedValue ?? "",
+    field: String(gap.field ?? "unknownField"),
+    reason: String(gap.reason ?? "RequiresInput"),
+    suggestion: Array.isArray(gap.suggestion) ? gap.suggestion.join(", ") : String(gap.suggestion ?? ""),
+    resolvedValue: String(gap.resolvedValue ?? ""),
     required: gap.required ?? true,
   }))
 }
@@ -675,7 +675,7 @@ export async function publishPackageInFirestore(item: IngestionPackage) {
   item.draftSections.forEach((section) => {
     const key = reverseFormatLabel(section.label)
     if (key === "docId" || key === "id") {
-      docId = section.value.trim()
+      docId = String(section.value ?? "").trim()
     } else if (key === "status") {
       docData[key] = "Active"
     } else {

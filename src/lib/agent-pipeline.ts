@@ -39,7 +39,7 @@ async function callGeminiJSON<T>(systemPrompt: string, userPrompt: string): Prom
   const response = await (window.vertex as any).chat(messages, { responseMimeType: "application/json" })
 
   // Clean markdown json formatting if present
-  let cleanText = response.trim()
+  let cleanText = String(response ?? "").trim()
   if (cleanText.startsWith("```json")) {
     cleanText = cleanText.substring(7)
   } else if (cleanText.startsWith("```")) {
