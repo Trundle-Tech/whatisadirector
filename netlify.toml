@@ -8,6 +8,12 @@
   # VITE_FIREBASE_PROJECT_ID is the GCP project name (not a secret) and appears throughout docs
   SECRETS_SCAN_OMIT_KEYS = "VITE_FIREBASE_PROJECT_ID"
 
+# Allow Firebase Google Sign-In popup to communicate back to the opener
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+
 # Serverless function endpoints are available under /api/* (e.g. /api/vertex)
 [[redirects]]
   from = "/api/*"
