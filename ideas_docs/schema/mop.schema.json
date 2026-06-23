@@ -1,0 +1,275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whatisadirector.internal/schema/mop",
+  "title": "MaintenanceOperatingProcedure",
+  "description": "Blueprint schema for a Maintenance Operating Procedure (MOP). Extends base_document.schema.json. Maps to Schema.org/TechArticle with nested HowTo steps and a custom internal type overlay. MOPs are specialized for equipment maintenance, system changes, and technical work — distinct from SOPs in that they have explicit equipment, spare parts, dependency, and risk modeling.",
+
+  "x-schemaOrg": {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "additionalType": "https://whatisadirector.internal/schema/MOP"
+  },
+
+  "x-firestore": {
+    "collection": "mops",
+    "versionsSubcollection": "versions",
+    "note": "Extends base_document fields. All base_document required fields apply here."
+  },
+
+  "allOf": [
+    { "$ref": "https://whatisadirector.internal/schema/base_document" }
+  ],
+
+  "properties": {
+
+    "docType": {
+      "type": "string",
+      "const": "MOP",
+      "description": "Discriminator — always 'MOP' for this collection."
+    },
+
+    "maintenanceType": {
+      "type": "string",
+      "description": "Classification of the maintenance activity.",
+      "enum": [
+        "Preventive",
+        "Corrective",
+        "Predictive",
+        "Condition-Based",
+        "Emergency",
+        "Shutdown",
+        "Commissioning",
+        "Decommissioning",
+        "Upgrade",
+        "Replacement"
+      ]
+    },
+
+    "maintenanceFrequency": {
+      "type": "object",
+      "description": "How often this MOP is scheduled to run.",
+      "properties": {
+        "interval": { "type": "string", "description": "Human-readable interval (e.g. 'Every 6 months', 'Annually', 'On-Demand')." },
+        "triggerCondition": { "type": "string", "description": "Condition-based trigger if applicable (e.g. 'Runtime hours > 1000', 'Vibration threshold exceeded')." }
+      }
+    },
+
+    "affectedSystems": {
+      "type": "array",
+      "description": "Systems, assets, or components that will be affected by this maintenance activity.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "assetId": { "type": "string", "description": "Asset tag or CMMS ID." },
+          "location": { "type": "string" },
+          "outageRequired": { "type": "boolean", "default": false, "description": "Set true if this system must be taken offline." },
+          "estimatedOutageDuration": { "type": "string", "description": "ISO 8601 duration of expected outage (e.g. 'PT4H')." }
+        }
+      }
+    },
+
+    "equipment": {
+      "type": "array",
+      "description": "Primary equipment being maintained. Schema.org: Product.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "manufacturer": { "type": "string" },
+          "model": { "type": "string" },
+          "serialNumber": { "type": "string" },
+          "assetId": { "type": "string" },
+          "manualRef": { "type": "string", "description": "Reference to OEM manual or document." }
+        }
+      }
+    },
+
+    "spareParts": {
+      "type": "array",
+      "description": "Replacement parts required for this MOP. Schema.org: Product.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "partNumber": { "type": "string" },
+          "quantity": { "type": "string" },
+          "vendor": { "type": "string" },
+          "leadTimeDays": { "type": "integer", "description": "Procurement lead time in days. Important for scheduling." },
+          "criticalSpare": { "type": "boolean", "default": false }
+        }
+      }
+    },
+
+    "tools": {
+      "type": "array",
+      "description": "Tools and test equipment required. Schema.org: HowToTool.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "specification": { "type": "string" },
+          "partNumber": { "type": "string" },
+          "calibrationRequired": { "type": "boolean", "default": false },
+          "calibrationDue": { "type": "string", "format": "date", "description": "Date calibration certificate expires." }
+        }
+      }
+    },
+
+    "safetyClassifications": {
+      "type": "array",
+      "description": "Applicable safety classifications, energy types, or hazard categories. Schema.org: DefinedTerm.",
+      "items": {
+        "type": "object",
+        "required": ["term"],
+        "properties": {
+          "term": { "type": "string", "description": "Classification label (e.g. 'LOTO Required', 'Confined Space Entry', 'Energized Electrical Work', 'Hot Work')." },
+          "permitRequired": { "type": "boolean", "default": false },
+          "permitType": { "type": "string" },
+          "standard": { "type": "string" }
+        }
+      }
+    },
+
+    "energyIsolationPlan": {
+      "type": "array",
+      "description": "Energy sources to be isolated before work begins (for LOTO compliance). One entry per energy source.",
+      "items": {
+        "type": "object",
+        "required": ["energyType", "isolationPoint", "isolationMethod"],
+        "properties": {
+          "energyType": {
+            "type": "string",
+            "enum": ["Electrical", "Pneumatic", "Hydraulic", "Thermal", "Mechanical", "Chemical", "Gravity"]
+          },
+          "isolationPoint": { "type": "string", "description": "Location or ID of the isolation point (e.g. 'MCC-7 Breaker 14')." },
+          "isolationMethod": { "type": "string", "description": "How isolation is achieved (e.g. 'Lock out at panel, apply red tag')." },
+          "verificationMethod": { "type": "string", "description": "How zero-energy state is verified (e.g. 'Test with multimeter at terminal block')." }
+        }
+      }
+    },
+
+    "dependencies": {
+      "type": "array",
+      "description": "Other MOPs, SOPs, or system states that must be completed or satisfied before this MOP can begin. Schema.org: TechArticle.dependencies.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "docId": { "type": "string", "description": "If a specific document must be completed first." },
+          "systemState": { "type": "string", "description": "Required system condition (e.g. 'Unit offline and cooled to ambient')." }
+        }
+      }
+    },
+
+    "riskAssessment": {
+      "type": "object",
+      "description": "Pre-job risk assessment summary.",
+      "properties": {
+        "overallRiskLevel": {
+          "type": "string",
+          "enum": ["Low", "Medium", "High", "Critical"],
+          "description": "Aggregate risk level for this maintenance activity."
+        },
+        "riskMitigations": {
+          "type": "array",
+          "description": "Key risk controls in place.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "hazard": { "type": "string" },
+              "likelihood": { "type": "string", "enum": ["Rare", "Unlikely", "Possible", "Likely", "AlmostCertain"] },
+              "severity": { "type": "string", "enum": ["Negligible", "Minor", "Moderate", "Major", "Catastrophic"] },
+              "control": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "steps": {
+      "type": "array",
+      "description": "The ordered sequence of maintenance actions. Nested under TechArticle as HowToStep objects. Steps may contain hold points requiring sign-off before proceeding.",
+      "items": {
+        "type": "object",
+        "required": ["stepNumber", "name", "instructions"],
+        "properties": {
+          "stepNumber": { "type": "string" },
+          "phase": {
+            "type": "string",
+            "description": "Logical phase grouping (e.g. 'Preparation', 'Isolation', 'Execution', 'Restoration', 'Testing', 'Closeout').",
+            "enum": ["Preparation", "Isolation", "Execution", "Restoration", "Testing", "Closeout", "Documentation"]
+          },
+          "name": { "type": "string" },
+          "instructions": { "type": "string" },
+          "image": { "type": "string" },
+          "criticalStep": { "type": "boolean", "default": false },
+          "holdPoint": {
+            "type": "boolean",
+            "default": false,
+            "description": "Execution must pause here for measurement, test, or sign-off before continuing."
+          },
+          "holdPointApprover": { "type": "string" },
+          "measuredValue": {
+            "type": "object",
+            "description": "If this step requires recording a measurement.",
+            "properties": {
+              "parameter": { "type": "string", "description": "What is being measured (e.g. 'Torque', 'Insulation Resistance', 'Vibration Level')." },
+              "expectedValue": { "type": "string" },
+              "unit": { "type": "string" },
+              "acceptanceMin": { "type": "number" },
+              "acceptanceMax": { "type": "number" },
+              "recordedValue": { "type": "number", "description": "Populated at execution time." }
+            }
+          },
+          "estimatedDuration": { "type": "string" },
+          "notes": { "type": "string" },
+          "substeps": {
+            "type": "array",
+            "items": { "$ref": "#/properties/steps/items" }
+          }
+        }
+      }
+    },
+
+    "totalTime": {
+      "type": "string",
+      "description": "Estimated total time to complete this MOP (ISO 8601 duration).",
+      "pattern": "^P(?:\\d+Y)?(?:\\d+M)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+S)?)?$"
+    },
+
+    "requiredPersonnel": {
+      "type": "array",
+      "description": "Roles and minimum headcount required to safely execute this MOP.",
+      "items": {
+        "type": "object",
+        "required": ["role", "count"],
+        "properties": {
+          "role": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 },
+          "certificationRequired": { "type": "string" }
+        }
+      }
+    },
+
+    "postWorkTests": {
+      "type": "array",
+      "description": "Tests or verifications that must pass before the system is returned to service.",
+      "items": {
+        "type": "object",
+        "required": ["name", "acceptanceCriteria"],
+        "properties": {
+          "name": { "type": "string" },
+          "method": { "type": "string" },
+          "acceptanceCriteria": { "type": "string" },
+          "result": { "type": "string", "description": "Populated at execution time: 'Pass' or 'Fail'." }
+        }
+      }
+    }
+
+  }
+}

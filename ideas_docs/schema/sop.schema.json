@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whatisadirector.internal/schema/sop",
+  "title": "StandardOperatingProcedure",
+  "description": "Blueprint schema for a Standard Operating Procedure (SOP). Extends base_document.schema.json. Maps to Schema.org/HowTo with a custom internal type overlay. SOPs describe a repeatable, step-by-step process for a routine or regulated task.",
+
+  "x-schemaOrg": {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "additionalType": "https://whatisadirector.internal/schema/SOP"
+  },
+
+  "x-firestore": {
+    "collection": "sops",
+    "versionsSubcollection": "versions",
+    "note": "Extends base_document fields. All base_document required fields apply here."
+  },
+
+  "allOf": [
+    { "$ref": "https://whatisadirector.internal/schema/base_document" }
+  ],
+
+  "properties": {
+
+    "docType": {
+      "type": "string",
+      "const": "SOP",
+      "description": "Discriminator — always 'SOP' for this collection."
+    },
+
+    "sopCategory": {
+      "type": "string",
+      "description": "Operational category of this SOP.",
+      "enum": [
+        "Safety",
+        "Environmental",
+        "Quality",
+        "Operations",
+        "Maintenance",
+        "Administrative",
+        "IT",
+        "Security",
+        "HR",
+        "Regulatory",
+        "Emergency"
+      ]
+    },
+
+    "prerequisites": {
+      "type": "array",
+      "description": "Conditions, training, or certifications that must be met before executing this SOP. Schema.org: requirements.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["Training", "Certification", "Equipment", "Authorization", "Condition"]
+          },
+          "required": { "type": "boolean" }
+        }
+      }
+    },
+
+    "safetyRequirements": {
+      "type": "array",
+      "description": "PPE, lockout/tagout, permits, or other safety controls required before beginning. These must be acknowledged before execution.",
+      "items": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "description": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["PPE", "LOTO", "Permit", "Clearance", "Isolation", "Ventilation", "Other"]
+          },
+          "standard": { "type": "string", "description": "Applicable safety standard or regulation (e.g. 'OSHA 29 CFR 1910.147')." },
+          "mandatory": { "type": "boolean", "default": true }
+        }
+      }
+    },
+
+    "supplies": {
+      "type": "array",
+      "description": "Materials and consumables required to perform this SOP. Schema.org: supply (HowToSupply).",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "quantity": { "type": "string", "description": "Amount required (e.g. '2 liters', '1 roll')." },
+          "partNumber": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+
+    "tools": {
+      "type": "array",
+      "description": "Equipment and tools required to perform this SOP. Schema.org: tool (HowToTool).",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "specification": { "type": "string", "description": "Size, rating, or model spec (e.g. 'Torque wrench 50–150 ft-lbs')." },
+          "partNumber": { "type": "string" },
+          "calibrationRequired": { "type": "boolean", "default": false }
+        }
+      }
+    },
+
+    "steps": {
+      "type": "array",
+      "description": "The ordered sequence of actions to perform. Schema.org: step (HowToStep). Steps may be nested into sections.",
+      "items": {
+        "type": "object",
+        "required": ["stepNumber", "name", "instructions"],
+        "properties": {
+          "stepNumber": {
+            "type": "string",
+            "description": "Display number or code (e.g. '1', '1.1', '2a'). Supports hierarchical numbering."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short title for the step. Schema.org: HowToStep.name."
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Full, detailed instructions for this step. Written in active imperative voice. Schema.org: HowToStep.text."
+          },
+          "image": {
+            "type": "string",
+            "description": "URL or Storage path to a supporting image or diagram for this step."
+          },
+          "criticalStep": {
+            "type": "boolean",
+            "default": false,
+            "description": "Flag if this step has a safety-critical or quality-critical consequence if missed."
+          },
+          "holdPoint": {
+            "type": "boolean",
+            "default": false,
+            "description": "Flag if execution must pause here for a sign-off, inspection, or test before proceeding."
+          },
+          "holdPointApprover": {
+            "type": "string",
+            "description": "Role required to sign off at this hold point (e.g. 'Quality Inspector', 'Shift Supervisor')."
+          },
+          "estimatedDuration": {
+            "type": "string",
+            "description": "Expected time for this step (ISO 8601 duration, e.g. 'PT15M' for 15 minutes)."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Cautions, warnings, or additional context for this step."
+          },
+          "substeps": {
+            "type": "array",
+            "description": "Optional nested sub-steps.",
+            "items": { "$ref": "#/properties/steps/items" }
+          }
+        }
+      }
+    },
+
+    "totalTime": {
+      "type": "string",
+      "description": "Estimated total time to complete the full SOP (ISO 8601 duration, e.g. 'PT2H30M'). Schema.org: totalTime.",
+      "pattern": "^P(?:\\d+Y)?(?:\\d+M)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+S)?)?$"
+    },
+
+    "frequency": {
+      "type": "string",
+      "description": "How often this SOP is performed (e.g. 'Daily', 'Weekly', 'On-Demand', 'Post-Incident')."
+    },
+
+    "verificationMethod": {
+      "type": "string",
+      "description": "How successful completion is verified or measured.",
+      "enum": ["VisualInspection", "Measurement", "Test", "SignOff", "SystemCheck", "Checklist", "None"]
+    },
+
+    "completionSignOff": {
+      "type": "object",
+      "description": "Who is required to sign off on completion of this SOP.",
+      "properties": {
+        "requiredRole": { "type": "string" },
+        "twoPersonIntegrity": { "type": "boolean", "default": false, "description": "Set true if two independent sign-offs are required." }
+      }
+    }
+
+  }
+}

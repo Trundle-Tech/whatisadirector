@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whatisadirector.internal/schema/version_history",
+  "title": "VersionHistory",
+  "description": "Schema for a single version record stored in the Firestore subcollection: /{collection}/{docId}/versions/{versionId}. Every approved change to any operational document creates one of these records. Together they form a complete, immutable audit trail — the chain of custody for the document.",
+
+  "x-firestore": {
+    "subcollectionPath": "/{collection}/{docId}/versions",
+    "ordering": "versionNumber DESC",
+    "immutable": true,
+    "note": "Version records are write-once. Once created they are never modified. Corrections require a new version on the parent document."
+  },
+
+  "type": "object",
+
+  "required": [
+    "versionId",
+    "versionNumber",
+    "parentDocId",
+    "parentCollection",
+    "changeType",
+    "changedBy",
+    "changeDate",
+    "changeSummary",
+    "status"
+  ],
+
+  "properties": {
+
+    "versionId": {
+      "type": "string",
+      "description": "Unique ID of this version record. Maps to the Firestore document ID within the versions subcollection."
+    },
+
+    "versionNumber": {
+      "type": "string",
+      "description": "The version string at the time this record was created (e.g. '1.2.0'). Semantic versioning: MAJOR.MINOR.PATCH.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+
+    "previousVersionNumber": {
+      "type": "string",
+      "description": "The version string this record supersedes. Null for the initial version (1.0.0).",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+
+    "previousVersionId": {
+      "type": "string",
+      "description": "The versionId of the immediately prior record. Creates an explicit linked chain."
+    },
+
+    "parentDocId": {
+      "type": "string",
+      "description": "The Firestore document ID of the parent operational document."
+    },
+
+    "parentCollection": {
+      "type": "string",
+      "description": "The Firestore collection the parent document lives in.",
+      "enum": ["sops", "mops", "eops", "runbooks", "irps", "bcps", "trainingProcedures", "emergencyChecklists"]
+    },
+
+    "changeType": {
+      "type": "string",
+      "description": "Classification of what kind of change was made.",
+      "enum": [
+        "InitialCreation",
+        "ContentRevision",
+        "StepAdded",
+        "StepRemoved",
+        "StepModified",
+        "SafetyUpdate",
+        "RegulatoryUpdate",
+        "OwnershipTransfer",
+        "StatusChange",
+        "ApprovalAction",
+        "FormatCorrection",
+        "PeriodicReview"
+      ]
+    },
+
+    "changeSummary": {
+      "type": "string",
+      "description": "Human-readable summary of what changed in this version. Required. Must be specific enough to understand the change without reading the full diff."
+    },
+
+    "changeReason": {
+      "type": "string",
+      "description": "The justification or trigger for this change (e.g. 'OSHA citation 2024-03', 'Incident report #IR-441', 'Annual review cycle')."
+    },
+
+    "sectionsAffected": {
+      "type": "array",
+      "description": "List of section names or step numbers that were modified.",
+      "items": { "type": "string" }
+    },
+
+    "changedBy": {
+      "type": "object",
+      "description": "The person who authored this change. Chain of custody: who made the edit.",
+      "required": ["name", "userId"],
+      "properties": {
+        "name": { "type": "string" },
+        "userId": { "type": "string", "description": "Firebase Auth UID or internal user ID." },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "description": "Job title or role at time of change." }
+      }
+    },
+
+    "changeDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when this change was submitted. Server-side timestamp preferred."
+    },
+
+    "status": {
+      "type": "string",
+      "description": "The status of this version record.",
+      "enum": ["Draft", "PendingApproval", "Approved", "Rejected", "Superseded"]
+    },
+
+    "approvalChain": {
+      "type": "array",
+      "description": "The ordered sequence of approvers for this version. Each entry is appended when an approver acts. This is the authoritative chain of custody for this version.",
+      "items": {
+        "type": "object",
+        "required": ["approverName", "approverUserId", "approverRole", "action", "timestamp"],
+        "properties": {
+          "approverName": { "type": "string" },
+          "approverUserId": { "type": "string" },
+          "approverRole": { "type": "string" },
+          "action": {
+            "type": "string",
+            "enum": ["Approved", "Rejected", "RequestedChanges", "Delegated", "Acknowledged"]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the approver took action."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Optional notes from the approver. Required if action is Rejected or RequestedChanges."
+          },
+          "delegatedTo": {
+            "type": "string",
+            "description": "If action is Delegated, the userId of the person delegated to."
+          }
+        }
+      }
+    },
+
+    "effectiveDate": {
+      "type": "string",
+      "format": "date",
+      "description": "The date this version became operationally effective. May differ from changeDate if a future effective date was set."
+    },
+
+    "snapshotRef": {
+      "type": "string",
+      "description": "Reference to a full document snapshot at this version (e.g. a Firestore path or Storage URL). Preserves the complete document state at this point in time."
+    },
+
+    "diffRef": {
+      "type": "string",
+      "description": "Optional reference to a structured diff artifact showing exactly what changed between this version and the previous one."
+    },
+
+    "linkedIncidents": {
+      "type": "array",
+      "description": "Any incident, audit finding, or corrective action that triggered or is associated with this change.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "incidentId": { "type": "string" },
+          "type": { "type": "string", "enum": ["Incident", "AuditFinding", "CorrectiveAction", "RegulatoryRequirement", "CustomerFeedback"] },
+          "description": { "type": "string" }
+        }
+      }
+    }
+
+  }
+}

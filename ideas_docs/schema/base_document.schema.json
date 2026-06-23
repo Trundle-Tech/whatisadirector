@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whatisadirector.internal/schema/base_document",
+  "title": "OperationalDocument",
+  "description": "Base schema for all operational documents (SOP, MOP, EOP, Runbook, IRP, etc.). All document types extend this schema. Maps to Schema.org/CreativeWork with a custom internal type overlay.",
+  "type": "object",
+
+  "x-schemaOrg": {
+    "@context": "https://schema.org",
+    "@type": "CreativeWork",
+    "additionalType": "https://whatisadirector.internal/schema/OperationalDocument"
+  },
+
+  "x-firestore": {
+    "note": "This is the base shape. Each document type lives in its own top-level collection: /sops, /mops, /eops. Version history lives in the subcollection: /{collection}/{docId}/versions/{versionId}."
+  },
+
+  "required": [
+    "docId",
+    "docType",
+    "name",
+    "status",
+    "version",
+    "owner",
+    "creator",
+    "dateCreated",
+    "dateModified"
+  ],
+
+  "properties": {
+
+    "docId": {
+      "type": "string",
+      "description": "Unique identifier for this document. Maps to the Firestore document ID."
+    },
+
+    "docType": {
+      "type": "string",
+      "description": "Discriminator field identifying the document type.",
+      "enum": ["SOP", "MOP", "EOP", "Runbook", "IRP", "BCP", "TrainingProcedure", "EmergencyChecklist"]
+    },
+
+    "name": {
+      "type": "string",
+      "description": "The official title of the document. Schema.org: name."
+    },
+
+    "description": {
+      "type": "string",
+      "description": "A plain-language summary of the document's purpose and scope. Schema.org: description."
+    },
+
+    "status": {
+      "type": "string",
+      "description": "Current lifecycle status of the document.",
+      "enum": ["Draft", "UnderReview", "Approved", "Active", "Superseded", "Retired"]
+    },
+
+    "version": {
+      "type": "string",
+      "description": "Current version string. Use semantic versioning (e.g. '1.0.0'). Incremented on every approved change.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+
+    "owner": {
+      "type": "object",
+      "description": "The organizational unit or role responsible for maintaining this document. Schema.org: Organization.",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "Name of the owning department, team, or role." },
+        "contactEmail": { "type": "string", "format": "email" },
+        "orgUnit": { "type": "string", "description": "Optional sub-unit or division." }
+      }
+    },
+
+    "creator": {
+      "type": "object",
+      "description": "The person who originally authored the document. Schema.org: Person.",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "userId": { "type": "string", "description": "Internal user ID (Firebase Auth UID or equivalent)." },
+        "role": { "type": "string", "description": "Job title or role at time of creation." }
+      }
+    },
+
+    "dateCreated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the document was first created. Schema.org: dateCreated."
+    },
+
+    "dateModified": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the most recent modification. Schema.org: dateModified. Updated automatically on every save."
+    },
+
+    "dateEffective": {
+      "type": "string",
+      "format": "date",
+      "description": "The date this version became or becomes operationally effective. Schema.org: datePublished."
+    },
+
+    "dateNextReview": {
+      "type": "string",
+      "format": "date",
+      "description": "Scheduled date for the next mandatory review cycle."
+    },
+
+    "keywords": {
+      "type": "array",
+      "description": "Tags for search and categorization. Schema.org: keywords.",
+      "items": { "type": "string" }
+    },
+
+    "audience": {
+      "type": "object",
+      "description": "The intended audience for this document. Schema.org: Audience.",
+      "properties": {
+        "audienceType": { "type": "string", "description": "Role or group (e.g. 'Field Technician', 'Incident Commander')." },
+        "department": { "type": "string" },
+        "certificationRequired": { "type": "string", "description": "Any certification or training prerequisite." }
+      }
+    },
+
+    "department": {
+      "type": "string",
+      "description": "Primary department this document belongs to."
+    },
+
+    "facility": {
+      "type": "string",
+      "description": "Specific facility, site, or location this document applies to."
+    },
+
+    "relatedDocuments": {
+      "type": "array",
+      "description": "References to other documents that are related, superseded, or dependencies.",
+      "items": {
+        "type": "object",
+        "required": ["docId", "relationship"],
+        "properties": {
+          "docId": { "type": "string" },
+          "name": { "type": "string" },
+          "docType": { "type": "string" },
+          "relationship": {
+            "type": "string",
+            "enum": ["SupersedesThis", "SupersededBy", "References", "IsReferencedBy", "DependsOn", "Supplements"]
+          }
+        }
+      }
+    },
+
+    "approvals": {
+      "type": "array",
+      "description": "Ordered list of approvals required and received for the current version. Maintains chain of custody at the document level.",
+      "items": {
+        "type": "object",
+        "required": ["approverName", "approverRole", "status"],
+        "properties": {
+          "approverName": { "type": "string" },
+          "approverUserId": { "type": "string" },
+          "approverRole": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["Pending", "Approved", "Rejected", "Delegated"]
+          },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "comments": { "type": "string" }
+        }
+      }
+    },
+
+    "tags": {
+      "type": "array",
+      "description": "Operational tags (e.g. 'safety-critical', 'regulatory', 'LOTO', 'confined-space').",
+      "items": { "type": "string" }
+    },
+
+    "regulatoryReferences": {
+      "type": "array",
+      "description": "Applicable regulations, standards, or codes this document must satisfy.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "body": { "type": "string", "description": "Issuing body (e.g. 'OSHA', 'NFPA', 'ISO')." },
+          "code": { "type": "string", "description": "Standard or regulation code (e.g. '29 CFR 1910.147')." },
+          "title": { "type": "string" }
+        }
+      }
+    },
+
+    "x-versionHistory": {
+      "type": "object",
+      "description": "Pointer to the Firestore subcollection. Not stored as a field — documents reference /{collection}/{docId}/versions. See version_history.schema.json.",
+      "readOnly": true,
+      "properties": {
+        "subcollection": { "type": "string", "const": "versions" }
+      }
+    }
+
+  }
+}

@@ -1,0 +1,427 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whatisadirector.internal/schema/ingestion_package",
+  "title": "IngestionPackage",
+  "description": "The atomic unit of the ingestion pipeline. A single submission that contains: the raw input, classification results, a primary document action (create or update), all downstream impacted document changes, and a single approval package that covers everything atomically. Nothing in this package is applied to the operational document collections until the entire package is approved. Stored in Firestore at /ingestionPackages/{packageId}.",
+
+  "x-firestore": {
+    "collection": "ingestionPackages",
+    "versionsSubcollection": "none",
+    "note": "Packages are not versioned themselves — they are a transaction record. Once Applied or Rejected, they are immutable. A re-submission creates a new package.",
+    "indexes": [
+      "status",
+      "submittedBy.userId",
+      "classification.primaryDocType",
+      "createdAt"
+    ]
+  },
+
+  "type": "object",
+
+  "required": [
+    "packageId",
+    "status",
+    "input",
+    "createdAt",
+    "submittedBy"
+  ],
+
+  "properties": {
+
+    "packageId": {
+      "type": "string",
+      "description": "Unique ID for this ingestion package. Maps to the Firestore document ID."
+    },
+
+    "status": {
+      "type": "string",
+      "description": "Lifecycle state of this package. Transitions are one-directional — packages never move backwards.",
+      "enum": [
+        "Processing",
+        "NeedsInput",
+        "StagedForReview",
+        "UnderReview",
+        "Approved",
+        "Rejected",
+        "Applied",
+        "Failed"
+      ]
+    },
+
+    "statusDetail": {
+      "type": "string",
+      "description": "Human-readable detail on current status (e.g. 'Awaiting manufacturer model number before staging can complete', 'Applied to 4 documents at 2026-06-22T14:30:00Z')."
+    },
+
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this package was created (submission timestamp)."
+    },
+
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last time any field in this package was modified."
+    },
+
+    "submittedBy": {
+      "type": "object",
+      "description": "The person who submitted the ingestion request.",
+      "required": ["userId", "name"],
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string" }
+      }
+    },
+
+    "input": {
+      "type": "object",
+      "description": "The raw input submitted by the user. Omnimodal — one or more input items.",
+      "required": ["items"],
+      "properties": {
+        "userIntent": {
+          "type": "string",
+          "description": "The free-text instruction the user provided alongside the input (e.g. 'We are adding this computer to our lab, we need the documentation')."
+        },
+        "items": {
+          "type": "array",
+          "description": "One or more input artifacts submitted together.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["inputId", "inputType"],
+            "properties": {
+              "inputId": { "type": "string" },
+              "inputType": {
+                "type": "string",
+                "enum": ["Image", "PDF", "Audio", "Video", "PlainText", "URL", "StructuredData"]
+              },
+              "mimeType": { "type": "string" },
+              "fileName": { "type": "string" },
+              "storageRef": { "type": "string", "description": "Firebase Storage path to the raw uploaded file." },
+              "url": { "type": "string", "description": "If inputType is URL, the target URL." },
+              "rawText": { "type": "string", "description": "If inputType is PlainText, the text content." },
+              "sizeBytes": { "type": "integer" },
+              "uploadedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+
+    "classification": {
+      "type": "object",
+      "description": "Output of the Classification Agent. Identifies what the input is, what action is being requested, and what document types are implicated.",
+      "properties": {
+        "identifiedSubject": {
+          "type": "string",
+          "description": "What the Classification Agent determined the input to be (e.g. 'Dell PowerEdge R750 Server', 'Chemical drum - Hydrochloric Acid 37%', 'Evacuation floor plan - Building C')."
+        },
+        "subjectCategory": {
+          "type": "string",
+          "description": "High-level category of the identified subject.",
+          "enum": ["ITEquipment", "IndustrialEquipment", "Chemical", "Facility", "Person", "Process", "Policy", "Product", "Hazard", "Vehicle", "Other"]
+        },
+        "intent": {
+          "type": "string",
+          "description": "The action being requested.",
+          "enum": ["CreateNewDocumentation", "UpdateExistingDocumentation", "RetireAsset", "LinkToExisting", "ReviewOnly"]
+        },
+        "primaryDocType": {
+          "type": "string",
+          "description": "The primary document type this ingestion will create or update.",
+          "enum": ["SOP", "MOP", "EOP", "Runbook", "IRP", "BCP", "TrainingProcedure", "EmergencyChecklist"]
+        },
+        "impliedDocTypes": {
+          "type": "array",
+          "description": "Additional document types that will likely need creation or updates as a result of this ingestion.",
+          "items": { "type": "string" }
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Classification confidence score (0.0–1.0). If below threshold (0.75), package enters NeedsInput state.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidenceFlags": {
+          "type": "array",
+          "description": "Specific fields or decisions where the Classification Agent had low confidence.",
+          "items": { "type": "string" }
+        },
+        "classifiedAt": { "type": "string", "format": "date-time" },
+        "classifiedByAgent": { "type": "string", "description": "Agent identifier that performed classification." }
+      }
+    },
+
+    "subagentLog": {
+      "type": "array",
+      "description": "Log of every subagent that ran as part of this ingestion, their status, and what they found or produced.",
+      "items": {
+        "type": "object",
+        "required": ["agentId", "agentType", "status"],
+        "properties": {
+          "agentId": { "type": "string" },
+          "agentType": {
+            "type": "string",
+            "enum": ["ClassificationAgent", "ResearchAgent", "SchemaMapperAgent", "DependencyAgent", "GapAgent"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["Pending", "Running", "Completed", "Failed", "Skipped"]
+          },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "completedAt": { "type": "string", "format": "date-time" },
+          "findingsSummary": { "type": "string", "description": "Human-readable summary of what this agent found or produced." },
+          "sourcesConsulted": {
+            "type": "array",
+            "description": "URLs, document IDs, or other sources this agent consulted.",
+            "items": { "type": "string" }
+          },
+          "errorMessage": { "type": "string", "description": "If status is Failed, the error message." }
+        }
+      }
+    },
+
+    "researchFindings": {
+      "type": "object",
+      "description": "Structured output from the Research Agent. Contains gathered facts about the identified subject that will feed the Schema Mapper.",
+      "properties": {
+        "manufacturer": { "type": "string" },
+        "model": { "type": "string" },
+        "specifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "value": { "type": "string" },
+              "source": { "type": "string" }
+            }
+          }
+        },
+        "knownHazards": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "applicableStandards": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "oemDocumentationUrls": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" }
+        },
+        "additionalContext": { "type": "string" }
+      }
+    },
+
+    "gapReport": {
+      "type": "array",
+      "description": "Output of the Gap Agent. Lists every required schema field that could not be auto-filled, with context on why and a suggested resolution. These become the checklist a reviewer must complete before approval.",
+      "items": {
+        "type": "object",
+        "required": ["field", "docTarget", "reason"],
+        "properties": {
+          "field": { "type": "string", "description": "The schema field path that is missing (e.g. 'steps[2].instructions', 'safetyRequirements[0].standard')." },
+          "docTarget": { "type": "string", "description": "Which document in the package this gap belongs to ('primary' or an impactedDocId)." },
+          "reason": {
+            "type": "string",
+            "enum": ["NotFoundInResearch", "RequiresOnSiteVerification", "RequiresSMEInput", "AmbiguousFromInput", "MultipleOptionsFound", "PermitRequirementUnknown"]
+          },
+          "suggestion": { "type": "string", "description": "The Gap Agent's best suggestion or question to ask the reviewer." },
+          "resolvedValue": { "type": "string", "description": "Populated by the reviewer when they fill this gap during review." },
+          "resolvedBy": { "type": "string", "description": "userId of the person who resolved this gap." },
+          "resolvedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+
+    "primaryAction": {
+      "type": "object",
+      "description": "The primary document create or update action this package will apply when approved.",
+      "required": ["actionType", "targetCollection"],
+      "properties": {
+        "actionType": {
+          "type": "string",
+          "enum": ["Create", "Update", "Retire"]
+        },
+        "targetCollection": {
+          "type": "string",
+          "description": "Firestore collection the document will be created in or updated (e.g. 'sops', 'mops', 'eops')."
+        },
+        "existingDocId": {
+          "type": "string",
+          "description": "If actionType is Update or Retire, the Firestore document ID of the existing document."
+        },
+        "proposedVersion": {
+          "type": "string",
+          "description": "The version string that will be set on the document if this package is approved.",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "documentDraft": {
+          "type": "object",
+          "description": "The full proposed document conforming to the appropriate schema (sop.schema.json, mop.schema.json, or eop.schema.json). This is what gets written to Firestore on approval.",
+          "additionalProperties": true
+        },
+        "changeSummary": {
+          "type": "string",
+          "description": "Human-readable description of what this primary action does."
+        },
+        "autoFilledFields": {
+          "type": "array",
+          "description": "List of field paths that were auto-filled by subagents (for reviewer transparency).",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "impactedDocuments": {
+      "type": "array",
+      "description": "All existing documents that the Dependency Agent identified as needing updates because of this ingestion. These proposed changes are included in the same approval package as the primary action — one approval covers everything.",
+      "items": {
+        "type": "object",
+        "required": ["impactId", "existingDocId", "collection", "changeType", "proposedChanges"],
+        "properties": {
+          "impactId": { "type": "string", "description": "Unique ID for this impact item within the package." },
+          "existingDocId": { "type": "string", "description": "Firestore document ID of the existing document." },
+          "existingDocName": { "type": "string", "description": "Display name of the existing document for review UI." },
+          "collection": { "type": "string", "description": "Collection the existing document lives in." },
+          "changeType": {
+            "type": "string",
+            "description": "What kind of change is being proposed to this document.",
+            "enum": ["AddReference", "UpdateContactInfo", "AddEquipment", "UpdateEquipment", "AddStep", "UpdateStep", "UpdateSafetyRequirement", "AddToResourceInventory", "UpdateHazardProfile", "AddRelatedDocument", "UpdateOwnership"]
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why the Dependency Agent flagged this document as needing this change."
+          },
+          "proposedChanges": {
+            "type": "array",
+            "description": "Field-level proposed changes. Each entry is one field path and its proposed new value.",
+            "items": {
+              "type": "object",
+              "required": ["fieldPath", "proposedValue"],
+              "properties": {
+                "fieldPath": { "type": "string", "description": "Dot-notation path to the field being changed (e.g. 'relatedDocuments', 'equipment[0]')." },
+                "currentValue": { "description": "The current value of this field (populated from Firestore for reviewer comparison)." },
+                "proposedValue": { "description": "The proposed new value." },
+                "changeReason": { "type": "string" }
+              }
+            }
+          },
+          "reviewerDecision": {
+            "type": "string",
+            "description": "Reviewer's decision on this specific impact item — can accept or reject individual items without rejecting the whole package.",
+            "enum": ["Accepted", "Rejected", "ModifiedAndAccepted"]
+          },
+          "reviewerNotes": { "type": "string" }
+        }
+      }
+    },
+
+    "approvalPackage": {
+      "type": "object",
+      "description": "The single approval that covers the primary action AND all accepted impacted document changes. One decision, one chain of custody entry, applied atomically.",
+      "properties": {
+        "submittedForReviewAt": { "type": "string", "format": "date-time" },
+        "submittedForReviewBy": {
+          "type": "object",
+          "properties": {
+            "userId": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        "assignedReviewers": {
+          "type": "array",
+          "description": "Users assigned to review this package.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": { "type": "string" },
+              "name": { "type": "string" },
+              "role": { "type": "string" },
+              "required": { "type": "boolean", "description": "If true, this reviewer must act before the package can be approved." }
+            }
+          }
+        },
+        "reviewActions": {
+          "type": "array",
+          "description": "Ordered log of every review action taken on this package.",
+          "items": {
+            "type": "object",
+            "required": ["reviewerId", "action", "timestamp"],
+            "properties": {
+              "reviewerId": { "type": "string" },
+              "reviewerName": { "type": "string" },
+              "reviewerRole": { "type": "string" },
+              "action": {
+                "type": "string",
+                "enum": ["Opened", "RequestedChanges", "ApprovedWithChanges", "Approved", "Rejected"]
+              },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "comments": { "type": "string" },
+              "gapsResolved": {
+                "type": "array",
+                "description": "IDs of gap report items resolved during this review action.",
+                "items": { "type": "string" }
+              },
+              "impactItemDecisions": {
+                "type": "array",
+                "description": "Per-item decisions on impacted documents made during this review action.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "impactId": { "type": "string" },
+                    "decision": { "type": "string", "enum": ["Accepted", "Rejected", "ModifiedAndAccepted"] }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "finalDecision": {
+          "type": "string",
+          "description": "The final decision on this package.",
+          "enum": ["Approved", "Rejected", "ApprovedWithModifications"]
+        },
+        "finalDecisionAt": { "type": "string", "format": "date-time" },
+        "finalDecisionBy": {
+          "type": "object",
+          "properties": {
+            "userId": { "type": "string" },
+            "name": { "type": "string" },
+            "role": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "applicationLog": {
+      "type": "object",
+      "description": "Record of what actually happened when this approved package was applied to Firestore. Populated after status transitions to Applied.",
+      "properties": {
+        "appliedAt": { "type": "string", "format": "date-time" },
+        "appliedBy": { "type": "string", "description": "System or userId that triggered the application." },
+        "documentsWritten": {
+          "type": "array",
+          "description": "Firestore paths that were written or updated.",
+          "items": { "type": "string" }
+        },
+        "versionRecordsCreated": {
+          "type": "array",
+          "description": "Firestore paths of version history records created in subcollections.",
+          "items": { "type": "string" }
+        },
+        "errors": {
+          "type": "array",
+          "description": "Any errors encountered during application. If non-empty, status should be Failed.",
+          "items": { "type": "string" }
+        }
+      }
+    }
+
+  }
+}

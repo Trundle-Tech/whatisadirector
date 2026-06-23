@@ -1,0 +1,309 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whatisadirector.internal/schema/eop",
+  "title": "EmergencyOperationsPlan",
+  "description": "Blueprint schema for an Emergency Operations Plan (EOP). Extends base_document.schema.json. Maps to Schema.org/CreativeWork with a custom internal type overlay. EOPs are structurally distinct from SOPs and MOPs — they define command structures, roles, functional annexes, and hazard-specific response procedures rather than step-by-step task instructions. Based on FEMA EOP format (Basic Plan + Functional Annexes + Hazard-Specific Appendices).",
+
+  "x-schemaOrg": {
+    "@context": "https://schema.org",
+    "@type": "CreativeWork",
+    "additionalType": "https://whatisadirector.internal/schema/EOP"
+  },
+
+  "x-firestore": {
+    "collection": "eops",
+    "versionsSubcollection": "versions",
+    "note": "Extends base_document fields. EOPs contain nested subcollection pointers for Annexes and Appendices, which may themselves be separate documents. All base_document required fields apply here."
+  },
+
+  "allOf": [
+    { "$ref": "https://whatisadirector.internal/schema/base_document" }
+  ],
+
+  "properties": {
+
+    "docType": {
+      "type": "string",
+      "const": "EOP",
+      "description": "Discriminator — always 'EOP' for this collection."
+    },
+
+    "eopType": {
+      "type": "string",
+      "description": "Classification of emergency plan scope.",
+      "enum": [
+        "FacilityEOP",
+        "CorporateEOP",
+        "IT-DisasterRecovery",
+        "BusinessContinuity",
+        "HazmatResponse",
+        "FireEvacuation",
+        "NaturalDisaster",
+        "ActiveThreat",
+        "PandemicResponse",
+        "CyberIncident",
+        "UtilityFailure",
+        "Other"
+      ]
+    },
+
+    "activationCriteria": {
+      "type": "array",
+      "description": "The conditions or thresholds that trigger activation of this EOP.",
+      "items": {
+        "type": "object",
+        "required": ["condition"],
+        "properties": {
+          "condition": { "type": "string", "description": "Description of the triggering condition (e.g. 'Fire alarm activation in Zone A')." },
+          "threshold": { "type": "string", "description": "Measurable threshold if applicable (e.g. 'Wind speed > 75 mph')." },
+          "declarationAuthority": { "type": "string", "description": "Role authorized to declare activation (e.g. 'Facility Manager', 'Incident Commander')." },
+          "notificationRequired": { "type": "boolean", "default": true }
+        }
+      }
+    },
+
+    "commandStructure": {
+      "type": "object",
+      "description": "The Incident Command System (ICS) or equivalent organizational structure activated during an emergency. Schema.org: Organization.",
+      "properties": {
+        "commandSystem": {
+          "type": "string",
+          "description": "The command framework in use (e.g. 'ICS', 'NIMS', 'Internal EOC')."
+        },
+        "positions": {
+          "type": "array",
+          "description": "Defined command positions, their responsibilities, and primary/alternate holders.",
+          "items": {
+            "type": "object",
+            "required": ["title", "responsibilities"],
+            "properties": {
+              "title": { "type": "string", "description": "Position title (e.g. 'Incident Commander', 'Operations Section Chief')." },
+              "responsibilities": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "primary": {
+                "type": "object",
+                "description": "Primary holder of this position.",
+                "properties": {
+                  "name": { "type": "string" },
+                  "role": { "type": "string" },
+                  "phone": { "type": "string" },
+                  "email": { "type": "string", "format": "email" }
+                }
+              },
+              "alternates": {
+                "type": "array",
+                "description": "Ordered list of alternates if primary is unavailable.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "role": { "type": "string" },
+                    "phone": { "type": "string" },
+                    "email": { "type": "string", "format": "email" }
+                  }
+                }
+              },
+              "reportsTo": { "type": "string", "description": "Title of the position this role reports to in the command structure." }
+            }
+          }
+        }
+      }
+    },
+
+    "emergencyContacts": {
+      "type": "array",
+      "description": "Critical contact information for internal and external entities. Schema.org: ContactPoint.",
+      "items": {
+        "type": "object",
+        "required": ["name", "contactType"],
+        "properties": {
+          "name": { "type": "string" },
+          "organization": { "type": "string" },
+          "contactType": {
+            "type": "string",
+            "enum": ["Internal", "LocalAuthority", "FireDepartment", "LawEnforcement", "EMS", "HazmatTeam", "Utility", "Vendor", "Regulatory", "MediaRelations", "LegalCounsel", "InsuranceCarrier", "Other"]
+          },
+          "phone24hr": { "type": "string", "description": "24-hour emergency phone number." },
+          "phoneBusiness": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "address": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+
+    "facilities": {
+      "type": "array",
+      "description": "Physical locations relevant to this EOP — primary facility, emergency operations center, staging areas, evacuation points. Schema.org: Place.",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["PrimaryFacility", "EmergencyOperationsCenter", "AlternateFacility", "AssemblyArea", "StagingArea", "EvacuationPoint", "Shelter", "MediaBriefingPoint"]
+          },
+          "address": { "type": "string" },
+          "gpsCoordinates": {
+            "type": "object",
+            "properties": {
+              "latitude": { "type": "number" },
+              "longitude": { "type": "number" }
+            }
+          },
+          "capacity": { "type": "integer", "description": "Person capacity if applicable." },
+          "accessInstructions": { "type": "string" },
+          "accessibilityFeatures": { "type": "string" }
+        }
+      }
+    },
+
+    "hazardProfiles": {
+      "type": "array",
+      "description": "The specific hazards or emergency scenarios this EOP addresses. Schema.org: DefinedTerm.",
+      "items": {
+        "type": "object",
+        "required": ["hazardType"],
+        "properties": {
+          "hazardType": {
+            "type": "string",
+            "enum": ["Fire", "Explosion", "ChemicalRelease", "BiologicalThreat", "NaturalDisaster", "SevereWeather", "PowerOutage", "WaterOutage", "CyberAttack", "ActiveThreat", "MedicalEmergency", "Earthquake", "Flood", "Pandemic", "StructuralFailure", "TransportationAccident", "Other"]
+          },
+          "likelihood": { "type": "string", "enum": ["Rare", "Unlikely", "Possible", "Likely", "AlmostCertain"] },
+          "potentialImpact": { "type": "string", "enum": ["Negligible", "Minor", "Moderate", "Major", "Catastrophic"] },
+          "annexRef": { "type": "string", "description": "ID of the hazard-specific annex that contains the detailed response procedure for this hazard." }
+        }
+      }
+    },
+
+    "functionalAnnexes": {
+      "type": "array",
+      "description": "Functional annexes covering specific operational areas of emergency response. Schema.org: CreativeWorkSeries. Each annex may reference a separate document in Firestore or be embedded here.",
+      "items": {
+        "type": "object",
+        "required": ["annexId", "title", "function"],
+        "properties": {
+          "annexId": { "type": "string" },
+          "title": { "type": "string", "description": "Annex title (e.g. 'Annex A: Communications', 'Annex B: Evacuation')." },
+          "function": {
+            "type": "string",
+            "enum": ["Communications", "Evacuation", "ShelterInPlace", "MedicalResponse", "Search&Rescue", "FireSuppression", "HazmatResponse", "Security", "PublicInformation", "Logistics", "Finance", "ResourceManagement", "MassCareFacilities", "UtilityRestoration", "IT-Recovery"]
+          },
+          "leadRole": { "type": "string", "description": "ICS position responsible for this annex." },
+          "supportingRoles": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "docRef": { "type": "string", "description": "Firestore document path if this annex is a separate document." },
+          "procedures": {
+            "type": "array",
+            "description": "Embedded HowTo-style response procedures for this annex.",
+            "items": {
+              "type": "object",
+              "required": ["name", "steps"],
+              "properties": {
+                "name": { "type": "string" },
+                "triggerCondition": { "type": "string" },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["stepNumber", "instructions"],
+                    "properties": {
+                      "stepNumber": { "type": "string" },
+                      "instructions": { "type": "string" },
+                      "responsibleRole": { "type": "string" },
+                      "timeframe": { "type": "string", "description": "When this step must be completed relative to activation (e.g. 'Within 15 minutes of activation')." },
+                      "notes": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "resourceInventories": {
+      "type": "array",
+      "description": "Inventories of emergency resources available. Schema.org: Dataset.",
+      "items": {
+        "type": "object",
+        "required": ["name", "resourceType"],
+        "properties": {
+          "name": { "type": "string" },
+          "resourceType": {
+            "type": "string",
+            "enum": ["FirstAidKit", "FireExtinguisher", "AED", "EmergencyGenerator", "EmergencySupplyCache", "CommunicationsEquipment", "PPEStockpile", "WaterSupply", "Shelter", "Transportation", "Other"]
+          },
+          "location": { "type": "string" },
+          "quantity": { "type": "string" },
+          "lastInspectedDate": { "type": "string", "format": "date" },
+          "nextInspectionDate": { "type": "string", "format": "date" },
+          "custodian": { "type": "string" }
+        }
+      }
+    },
+
+    "communicationsPlan": {
+      "type": "object",
+      "description": "How information is communicated during the emergency — internal notifications, external notifications, and public communications.",
+      "properties": {
+        "primaryChannel": { "type": "string", "description": "Primary communication method during the emergency (e.g. 'Emergency PA System', 'Mass Notification System', 'Radio')." },
+        "backupChannel": { "type": "string" },
+        "notificationSequence": {
+          "type": "array",
+          "description": "Ordered notification chain — who is notified, in what order, by what method.",
+          "items": {
+            "type": "object",
+            "required": ["order", "recipient", "method"],
+            "properties": {
+              "order": { "type": "integer" },
+              "recipient": { "type": "string" },
+              "method": { "type": "string", "enum": ["Phone", "SMS", "Email", "PA", "Radio", "InPerson", "MassNotification"] },
+              "timeframeMinutes": { "type": "integer", "description": "Maximum time in minutes from activation to notification." }
+            }
+          }
+        },
+        "mediaProtocol": { "type": "string", "description": "Who is authorized to speak to media and what the protocol is." }
+      }
+    },
+
+    "trainingRequirements": {
+      "type": "array",
+      "description": "Training and drill requirements to maintain readiness for this EOP.",
+      "items": {
+        "type": "object",
+        "required": ["name", "frequency"],
+        "properties": {
+          "name": { "type": "string", "description": "Training or drill name (e.g. 'Annual Full-Scale Evacuation Drill')." },
+          "type": { "type": "string", "enum": ["Tabletop", "Functional", "Full-Scale", "Orientation", "Awareness"] },
+          "frequency": { "type": "string" },
+          "requiredParticipants": { "type": "string" },
+          "lastConductedDate": { "type": "string", "format": "date" },
+          "nextScheduledDate": { "type": "string", "format": "date" }
+        }
+      }
+    },
+
+    "planMaintenanceSchedule": {
+      "type": "object",
+      "description": "Schedule for reviewing and updating this EOP.",
+      "properties": {
+        "reviewFrequency": { "type": "string", "description": "How often the full plan is reviewed (e.g. 'Annually', 'After every activation')." },
+        "triggerReviews": {
+          "type": "array",
+          "description": "Events that trigger an unscheduled review.",
+          "items": { "type": "string" }
+        },
+        "nextReviewDate": { "type": "string", "format": "date" },
+        "reviewAuthority": { "type": "string", "description": "Role responsible for conducting the review." }
+      }
+    }
+
+  }
+}
