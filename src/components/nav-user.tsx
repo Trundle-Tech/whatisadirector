@@ -18,7 +18,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { EllipsisVerticalIcon, CircleUserRoundIcon, ShieldCheckIcon, BellIcon, LogOutIcon } from "lucide-react"
+import { EllipsisVerticalIcon, CircleUserRoundIcon, ShieldCheckIcon, LogOutIcon } from "lucide-react"
 
 export function NavUser({
   user,
@@ -28,6 +28,8 @@ export function NavUser({
     name: string
     email: string
     avatar: string
+    role?: string
+    department?: string
   }
   onSignOut: () => void
 }) {
@@ -52,6 +54,11 @@ export function NavUser({
               <span className="truncate text-xs text-foreground/70">
                 {user.email}
               </span>
+              {user.role && (
+                <span className="text-[10px] text-primary font-semibold uppercase tracking-wider mt-0.5">
+                  {user.role} {user.department ? `• ${user.department}` : ""}
+                </span>
+              )}
             </div>
             <EllipsisVerticalIcon className="ml-auto size-4" />
           </DropdownMenuTrigger>
@@ -75,26 +82,26 @@ export function NavUser({
                     <span className="truncate text-xs text-muted-foreground">
                       {user.email}
                     </span>
+                    {user.role && (
+                      <span className="text-[10px] text-primary/80 font-semibold uppercase tracking-wider mt-0.5">
+                        {user.role} {user.department ? `• ${user.department}` : ""}
+                      </span>
+                    )}
                   </div>
                 </div>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { window.location.hash = "dashboard" }}>
                 <CircleUserRoundIcon
                 />
-                Account
+                Account Dashboard
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <ShieldCheckIcon
                 />
-                Permissions
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <BellIcon
-                />
-                Notifications
+                Permissions: {user.role || "Viewer"}
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

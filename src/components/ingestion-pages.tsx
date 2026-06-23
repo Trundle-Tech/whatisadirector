@@ -3,6 +3,7 @@ import {
   AlertTriangleIcon,
   CheckCircle2Icon,
   CircleIcon,
+  DatabaseIcon,
   FileInputIcon,
   FileTextIcon,
   LoaderCircleIcon,
@@ -58,6 +59,12 @@ import {
   updatePackageGapsInFirestore,
   publishPackageInFirestore,
   updateProposedSuggestionsInFirestore,
+  listenToAllUsers,
+  updateUserRoleAndDepartment,
+  updateDocumentStatusInFirestore,
+  subscribeToDocumentNotifications,
+  unsubscribeFromDocumentNotifications,
+  checkDocumentSubscription,
   type AgentLogEntry,
   type AgentStatus,
   type AppRoute,
@@ -144,7 +151,7 @@ const emptyPackage: IngestionPackage = {
   applicationLog: [],
 }
 
-export function IngestionPages({ route }: { route: AppRoute }) {
+export function IngestionPages({ route, userProfile }: { route: AppRoute; userProfile?: any }) {
   const [packages, setPackages] = React.useState<IngestionPackage[]>([])
   const [operationalDocuments, setOperationalDocuments] = React.useState<OperationalDocument[]>([])
   const [selectedId, setSelectedId] = React.useState("")
@@ -415,23 +422,37 @@ export function IngestionPages({ route }: { route: AppRoute }) {
     databaseError,
   }
 
+  const activeViewingDoc = React.useMemo(() => {
+    if (!viewingDoc) return null
+    return (
+      operationalDocuments.find(
+        (d) => d.id === viewingDoc.id && d.collection === viewingDoc.collection
+      ) || viewingDoc
+    )
+  }, [viewingDoc, operationalDocuments])
+
   const renderContent = () => {
     if (route === "ingestion") return <IngestionPage {...pageProps} />
     if (route === "review-queue") return <ReviewQueuePage {...pageProps} />
     if (route === "publish-queue") return <PublishQueuePage {...pageProps} />
     if (route === "operational-docs") return <OperationalDocsPage documents={operationalDocuments} />
     if (route === "audit-trail") return <AuditTrailPage packages={packages} />
+    if (route === "user-management") return <UserManagementPage />
     if (route === "sops") return <DocumentLibraryPage collection="/sops" documents={operationalDocuments} onSelectDoc={setViewingDoc} />
     if (route === "mops") return <DocumentLibraryPage collection="/mops" documents={operationalDocuments} onSelectDoc={setViewingDoc} />
     if (route === "eops") return <DocumentLibraryPage collection="/eops" documents={operationalDocuments} onSelectDoc={setViewingDoc} />
-    return <DashboardPage {...pageProps} />
+    return <DashboardPage {...pageProps} userProfile={userProfile} />
   }
 
   return (
     <>
       {renderContent()}
-      {viewingDoc && (
-        <DocumentViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />
+      {activeViewingDoc && (
+        <DocumentViewerModal
+          doc={activeViewingDoc}
+          onClose={() => setViewingDoc(null)}
+          userProfile={userProfile}
+        />
       )}
     </>
   )
@@ -479,7 +500,14 @@ function DashboardPage({
   processingCount,
   appliedCount,
   setSelectedId,
-}: PageProps) {
+  operationalDocuments,
+  userProfile,
+}: PageProps & { userProfile?: any }) {
+  const isViewer = !userProfile?.role || userProfile.role === "Viewer"
+  if (isViewer) {
+    return <ViewerDashboard documents={operationalDocuments} userProfile={userProfile} />
+  }
+
   const totalAuto = packages.reduce((total, item) => total + item.autoFilledFields, 0)
   return (
     <PageGrid>
@@ -543,6 +571,622 @@ function DashboardPage({
         </CardContent>
       </Card>
     </PageGrid>
+  )
+}
+
+// ─── Viewer Dashboard ────────────────────────────────────────────────────────
+
+const NAV_SECTIONS = [
+  {
+    href: "#sops",
+    label: "SOP Library",
+    description: "Standard Operating Procedures — step-by-step operational guidance for recurring tasks.",
+    color: "from-blue-500/10 to-blue-600/5 border-blue-500/20",
+    dot: "bg-blue-500",
+    icon: "📋",
+  },
+  {
+    href: "#mops",
+    label: "MOP Library",
+    description: "Methods of Procedure — detailed technical procedures for complex or critical operations.",
+    color: "from-emerald-500/10 to-emerald-600/5 border-emerald-500/20",
+    dot: "bg-emerald-500",
+    icon: "🔧",
+  },
+  {
+    href: "#eops",
+    label: "EOP Library",
+    description: "Emergency Operating Procedures — response plans for abnormal and emergency conditions.",
+    color: "from-amber-500/10 to-amber-600/5 border-amber-500/20",
+    dot: "bg-amber-500",
+    icon: "⚡",
+  },
+  {
+    href: "#operational-docs",
+    label: "All Documents",
+    description: "Browse the full library of active operational documents across all collections.",
+    color: "from-violet-500/10 to-violet-600/5 border-violet-500/20",
+    dot: "bg-violet-500",
+    icon: "📂",
+  },
+]
+
+// ─── Scoring ─────────────────────────────────────────────────────────────────
+
+type ScoreMap = Map<string, number>
+
+function scoreDocuments(documents: OperationalDocument[], query: string): ScoreMap {
+  const scores = new Map<string, number>()
+  if (!query.trim()) return scores
+
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+
+  for (const doc of documents) {
+    let score = 0
+    const titleLower = doc.title.toLowerCase()
+    const ownerLower = (doc.owner || "").toLowerCase()
+    const collectionLabel = doc.collection.replace("/", "").toLowerCase() // "sops" "mops" "eops"
+    const statusLower = (doc.status || "").toLowerCase()
+    const versionLower = (doc.version || "").toLowerCase()
+
+    // Flatten rawData values for meta search
+    const rawTokens: string[] = []
+    if (doc.rawData) {
+      for (const val of Object.values(doc.rawData)) {
+        if (typeof val === "string") rawTokens.push(val.toLowerCase())
+        else if (Array.isArray(val)) {
+          for (const item of val) {
+            if (typeof item === "string") rawTokens.push(item.toLowerCase())
+            else if (item && typeof item === "object") {
+              for (const v of Object.values(item)) {
+                if (typeof v === "string") rawTokens.push(v.toLowerCase())
+              }
+            }
+          }
+        }
+      }
+    }
+    const rawJoined = rawTokens.join(" ")
+
+    for (const term of terms) {
+      // Title — highest weight
+      if (titleLower === term) score += 100
+      else if (titleLower.startsWith(term)) score += 70
+      else if (titleLower.includes(term)) score += 50
+
+      // Owner — high weight
+      if (ownerLower === term) score += 60
+      else if (ownerLower.includes(term)) score += 35
+
+      // Collection type match ("sop", "mop", "eop")
+      if (collectionLabel.startsWith(term) || term === collectionLabel.slice(0, -1)) score += 40
+
+      // Status
+      if (statusLower.includes(term)) score += 20
+
+      // Version
+      if (versionLower.includes(term)) score += 15
+
+      // rawData meta search — lower weight, fires once per field
+      if (rawJoined.includes(term)) score += 10
+    }
+
+    if (score > 0) scores.set(doc.id, score)
+  }
+
+  return scores
+}
+
+// ─── Graph types & helpers ────────────────────────────────────────────────────
+
+type GraphNode = {
+  id: string
+  title: string
+  collection: "/sops" | "/mops" | "/eops"
+  owner: string
+  status: string
+  x: number
+  y: number
+  vx: number
+  vy: number
+}
+
+type GraphEdge = {
+  source: string
+  target: string
+  strength: "strong" | "weak"
+}
+
+function buildGraph(documents: OperationalDocument[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes: GraphNode[] = documents.map((doc, i) => {
+    const angle = (i / Math.max(documents.length, 1)) * 2 * Math.PI
+    const r = 180
+    return {
+      id: doc.id,
+      title: doc.title,
+      collection: doc.collection,
+      owner: doc.owner,
+      status: doc.status,
+      x: 300 + r * Math.cos(angle),
+      y: 240 + r * Math.sin(angle),
+      vx: 0,
+      vy: 0,
+    }
+  })
+
+  const edges: GraphEdge[] = []
+  for (let i = 0; i < documents.length; i++) {
+    for (let j = i + 1; j < documents.length; j++) {
+      const a = documents[i]
+      const b = documents[j]
+      if (a.owner && b.owner && a.owner === b.owner) {
+        edges.push({ source: a.id, target: b.id, strength: "strong" })
+      } else if (a.collection === b.collection) {
+        edges.push({ source: a.id, target: b.id, strength: "weak" })
+      }
+    }
+  }
+  return { nodes, edges }
+}
+
+function nodeColor(collection: string): string {
+  if (collection === "/mops") return "#10b981"
+  if (collection === "/eops") return "#f59e0b"
+  return "#3b82f6"
+}
+
+// ─── DocumentGraph ────────────────────────────────────────────────────────────
+
+function DocumentGraph({
+  documents,
+  scores,
+  topId,
+  onSelectDoc,
+}: {
+  documents: OperationalDocument[]
+  scores: ScoreMap
+  topId: string | null
+  onSelectDoc: (doc: OperationalDocument) => void
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [dims, setDims] = React.useState({ w: 600, h: 480 })
+  const nodesRef = React.useRef<GraphNode[]>([])
+  const [, setRenderTick] = React.useState(0)
+  const rafRef = React.useRef<number>(0)
+  const [hoveredId, setHoveredId] = React.useState<string | null>(null)
+
+  // Resize observer
+  React.useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        setDims({ w: Math.max(width, 300), h: Math.max(height, 300) })
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Rebuild nodes when documents change
+  React.useEffect(() => {
+    const { nodes } = buildGraph(documents)
+    nodesRef.current = nodes.map((n) => ({
+      ...n,
+      x: dims.w / 2 + (Math.random() - 0.5) * dims.w * 0.6,
+      y: dims.h / 2 + (Math.random() - 0.5) * dims.h * 0.6,
+    }))
+  }, [documents, dims.w, dims.h])
+
+  // Force simulation — topId ref so tick closure always sees latest value
+  const topIdRef = React.useRef<string | null>(null)
+  const scoresRef = React.useRef<ScoreMap>(new Map())
+  topIdRef.current = topId
+  scoresRef.current = scores
+
+  React.useEffect(() => {
+    if (documents.length === 0) return
+    const { edges } = buildGraph(documents)
+    const cx = dims.w / 2
+    const cy = dims.h / 2
+
+    const tick = () => {
+      const nodes = nodesRef.current
+      if (!nodes.length) { rafRef.current = requestAnimationFrame(tick); return }
+
+      const currentTopId = topIdRef.current
+      const currentScores = scoresRef.current
+      const maxScore = currentScores.size > 0 ? Math.max(...currentScores.values()) : 0
+
+      // Repulsion
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const dx = nodes[j].x - nodes[i].x
+          const dy = nodes[j].y - nodes[i].y
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1
+          const force = 6000 / (dist * dist)
+          const fx = (dx / dist) * force
+          const fy = (dy / dist) * force
+          nodes[i].vx -= fx; nodes[i].vy -= fy
+          nodes[j].vx += fx; nodes[j].vy += fy
+        }
+      }
+
+      // Springs
+      const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+      for (const edge of edges) {
+        const a = nodeMap.get(edge.source)
+        const b = nodeMap.get(edge.target)
+        if (!a || !b) continue
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const targetLen = edge.strength === "strong" ? 110 : 170
+        const stretch = dist - targetLen
+        const k = edge.strength === "strong" ? 0.025 : 0.008
+        const fx = (dx / dist) * stretch * k
+        const fy = (dy / dist) * stretch * k
+        a.vx += fx; a.vy += fy
+        b.vx -= fx; b.vy -= fy
+      }
+
+      // Center gravity — top node pulls harder toward center
+      for (const n of nodes) {
+        const isTop = n.id === currentTopId
+        const nodeScore = currentScores.get(n.id) ?? 0
+        const normalizedScore = maxScore > 0 ? nodeScore / maxScore : 0
+        const gravityMult = isTop ? 4 : 1 + normalizedScore * 0.5
+        n.vx += (cx - n.x) * 0.006 * gravityMult
+        n.vy += (cy - n.y) * 0.006 * gravityMult
+        n.vx *= 0.82; n.vy *= 0.82
+        n.x += n.vx; n.y += n.vy
+        const pad = 40
+        n.x = Math.max(pad, Math.min(dims.w - pad, n.x))
+        n.y = Math.max(pad, Math.min(dims.h - pad, n.y))
+      }
+
+      setRenderTick((t) => t + 1)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [documents, dims])
+
+  const { edges } = buildGraph(documents)
+  const nodes = nodesRef.current
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+
+  const hasSearch = scores.size > 0
+  const maxScore = hasSearch ? Math.max(...scores.values()) : 0
+
+  // Connected node ids for top node
+  const topConnectedIds = React.useMemo(() => {
+    if (!topId) return new Set<string>()
+    const connected = new Set<string>()
+    for (const edge of edges) {
+      if (edge.source === topId) connected.add(edge.target)
+      if (edge.target === topId) connected.add(edge.source)
+    }
+    return connected
+  }, [topId, edges])
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full min-h-[380px]">
+      <svg width={dims.w} height={dims.h} className="absolute inset-0">
+        <defs>
+          {nodes.map((n) => (
+            <radialGradient key={`glow-${n.id}`} id={`glow-${n.id}`} cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor={nodeColor(n.collection)} stopOpacity="0.7" />
+              <stop offset="100%" stopColor={nodeColor(n.collection)} stopOpacity="0" />
+            </radialGradient>
+          ))}
+          <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+          <filter id="bloom-strong" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="6" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+
+        {/* Edges */}
+        {edges.map((edge, i) => {
+          const a = nodeMap.get(edge.source)
+          const b = nodeMap.get(edge.target)
+          if (!a || !b) return null
+
+          const topEdge = topId && (edge.source === topId || edge.target === topId)
+          const aScore = scores.get(edge.source) ?? 0
+          const bScore = scores.get(edge.target) ?? 0
+          const bothScored = hasSearch && aScore > 0 && bScore > 0
+          const eitherScored = hasSearch && (aScore > 0 || bScore > 0)
+          const dimmed = hasSearch && !eitherScored
+
+          const edgeColor = topEdge
+            ? nodeColor(a.collection)
+            : bothScored
+            ? nodeColor(a.collection)
+            : eitherScored
+            ? "hsl(var(--muted-foreground))"
+            : "hsl(var(--border))"
+
+          const edgeWidth = topEdge ? 2.5 : bothScored ? 1.8 : edge.strength === "strong" ? 1.2 : 0.7
+          const edgeOpacity = dimmed ? 0.08 : topEdge ? 0.9 : bothScored ? 0.7 : eitherScored ? 0.35 : 0.3
+
+          return (
+            <line
+              key={i}
+              x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              stroke={edgeColor}
+              strokeWidth={edgeWidth}
+              strokeOpacity={edgeOpacity}
+              strokeDasharray={edge.strength === "weak" && !topEdge ? "4 4" : undefined}
+              filter={topEdge ? "url(#bloom)" : bothScored ? "url(#bloom)" : undefined}
+            />
+          )
+        })}
+
+        {/* Nodes — render top node last so it sits on top */}
+        {[...nodes.filter((n) => n.id !== topId), ...nodes.filter((n) => n.id === topId)].map((n) => {
+          const isTop = n.id === topId
+          const nodeScore = scores.get(n.id) ?? 0
+          const normalizedScore = maxScore > 0 ? nodeScore / maxScore : 0
+          const isConnectedToTop = topConnectedIds.has(n.id)
+          const dimmed = hasSearch && nodeScore === 0
+          const hovered = hoveredId === n.id
+
+          // Radius: top=20, scored proportionally 12–17, default 10, hovered +2
+          const baseR = isTop ? 20 : hasSearch && nodeScore > 0 ? 10 + normalizedScore * 8 : 10
+          const r = hovered ? baseR + 2 : baseR
+
+          const showLabel = isTop || hovered || (hasSearch && nodeScore > 0)
+
+          return (
+            <g
+              key={n.id}
+              transform={`translate(${n.x},${n.y})`}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setHoveredId(n.id)}
+              onMouseLeave={() => setHoveredId(null)}
+              onClick={() => {
+                const doc = documents.find((d) => d.id === n.id)
+                if (doc) onSelectDoc(doc)
+              }}
+            >
+              {/* Outer halo */}
+              {(isTop || (hasSearch && nodeScore > 0) || hovered) && (
+                <circle
+                  r={r + (isTop ? 18 : 10)}
+                  fill={`url(#glow-${n.id})`}
+                  opacity={isTop ? 1 : normalizedScore * 0.8 + 0.2}
+                />
+              )}
+
+              {/* Connection ring for top-connected nodes */}
+              {isConnectedToTop && !isTop && !dimmed && (
+                <circle
+                  r={r + 5}
+                  fill="none"
+                  stroke={nodeColor(n.collection)}
+                  strokeWidth="1"
+                  strokeDasharray="3 3"
+                  opacity={0.5}
+                />
+              )}
+
+              <circle
+                r={r}
+                fill={dimmed ? `${nodeColor(n.collection)}22` : nodeColor(n.collection)}
+                stroke={isTop ? "#fff" : nodeScore > 0 ? nodeColor(n.collection) : "hsl(var(--background))"}
+                strokeWidth={isTop ? 2.5 : nodeScore > 0 ? 1.5 : 1.5}
+                filter={isTop ? "url(#bloom-strong)" : nodeScore > 0 ? "url(#bloom)" : undefined}
+                opacity={dimmed ? 0.2 : 1}
+              />
+
+              {/* UnderReview amber ring */}
+              {n.status === "UnderReview" && !dimmed && (
+                <circle r={r + 4} fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="3 3" opacity={0.7} />
+              )}
+
+              {/* Crown for top node */}
+              {isTop && (
+                <text y={-r - 6} textAnchor="middle" fontSize="11" style={{ pointerEvents: "none", userSelect: "none" }}>
+                  ★
+                </text>
+              )}
+
+              {/* Label */}
+              {showLabel && (
+                <text
+                  y={r + 14}
+                  textAnchor="middle"
+                  fontSize={isTop ? "11" : "10"}
+                  fontWeight={isTop ? "700" : nodeScore > 0 ? "600" : "400"}
+                  fill="hsl(var(--foreground))"
+                  style={{ pointerEvents: "none", userSelect: "none" }}
+                >
+                  {n.title.length > 24 ? n.title.slice(0, 22) + "…" : n.title}
+                </text>
+              )}
+
+              {/* Score badge for top node */}
+              {isTop && maxScore > 0 && (
+                <text
+                  y={r + 26}
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="hsl(var(--muted-foreground))"
+                  style={{ pointerEvents: "none", userSelect: "none" }}
+                >
+                  score {nodeScore}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+
+      {/* Legend */}
+      <div className="absolute bottom-3 left-3 flex items-center gap-3 bg-background/80 backdrop-blur-sm rounded-lg border px-3 py-2">
+        {[
+          { color: "#3b82f6", label: "SOP" },
+          { color: "#10b981", label: "MOP" },
+          { color: "#f59e0b", label: "EOP" },
+        ].map((l) => (
+          <div key={l.label} className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} />
+            <span className="text-[10px] text-muted-foreground font-medium">{l.label}</span>
+          </div>
+        ))}
+        <span className="text-[10px] text-muted-foreground/60 ml-1">— same owner &nbsp;· · · same type</span>
+      </div>
+
+      {/* Empty state */}
+      {documents.length === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground gap-2">
+          <DatabaseIcon className="size-8 stroke-1 opacity-40" />
+          <p className="text-xs">No active documents yet.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ViewerDashboard ──────────────────────────────────────────────────────────
+
+function ViewerDashboard({
+  documents,
+  userProfile,
+}: {
+  documents: OperationalDocument[]
+  userProfile?: any
+}) {
+  const [query, setQuery] = React.useState("")
+  const [viewingDoc, setViewingDoc] = React.useState<OperationalDocument | null>(null)
+  const inputRef = React.useRef<HTMLInputElement>(null)
+
+  const scores = React.useMemo(() => scoreDocuments(documents, query), [documents, query])
+
+  const topId = React.useMemo(() => {
+    if (scores.size === 0) return null
+    let best: string | null = null
+    let bestScore = -1
+    scores.forEach((score, id) => {
+      if (score > bestScore) { bestScore = score; best = id }
+    })
+    return best
+  }, [scores])
+
+  const topDoc = topId ? documents.find((d) => d.id === topId) : null
+
+  const firstName = userProfile?.name?.split(" ")[0] || "there"
+
+  return (
+    <div className="flex flex-col gap-5 h-full">
+      {/* Welcome */}
+      <div className="flex flex-col gap-1">
+        <h2 className="text-xl font-semibold">Welcome back, {firstName}</h2>
+        <p className="text-sm text-muted-foreground">
+          Search for procedures, browse the libraries below, or explore document connections in the graph.
+        </p>
+      </div>
+
+      {/* Live search bar */}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") setQuery("") }}
+          placeholder="Search documents live — title, owner, type, status, or any field…"
+          className="w-full h-10 rounded-lg border border-input bg-background px-4 pr-10 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          autoComplete="off"
+        />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => { setQuery(""); inputRef.current?.focus() }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        ) : (
+          <Sparkles className="absolute right-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50 pointer-events-none" />
+        )}
+      </div>
+
+      {/* Top result pill */}
+      {topDoc && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-primary/5 border-primary/20 cursor-pointer hover:bg-primary/10 transition-colors"
+          onClick={() => setViewingDoc(topDoc)}
+        >
+          <span className="text-xs text-primary font-semibold shrink-0">Top result</span>
+          <span className="text-xs font-medium truncate">{topDoc.title}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0 ml-auto">{topDoc.collection.replace("/", "").toUpperCase()} · {topDoc.owner}</span>
+        </div>
+      )}
+
+      {/* Nav guide cards */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {NAV_SECTIONS.map((section) => (
+          <a
+            key={section.href}
+            href={section.href}
+            className={`flex flex-col gap-2 rounded-xl border bg-gradient-to-br p-4 transition-all hover:shadow-md hover:-translate-y-0.5 ${section.color}`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{section.icon}</span>
+              <span className="text-sm font-semibold">{section.label}</span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">{section.description}</p>
+          </a>
+        ))}
+      </div>
+
+      {/* Graph */}
+      <Card className="flex-1 min-h-0 overflow-hidden">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Document Graph</CardTitle>
+              <CardDescription className="text-xs mt-0.5">
+                {query
+                  ? `${scores.size} match${scores.size !== 1 ? "es" : ""} for "${query}" — highest weight node is centered and starred`
+                  : "All active documents and their connections — click any node to open"}
+              </CardDescription>
+            </div>
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                <X className="size-3" /> Clear
+              </button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0 h-[calc(100%-4rem)]">
+          <DocumentGraph
+            documents={documents}
+            scores={scores}
+            topId={topId}
+            onSelectDoc={setViewingDoc}
+          />
+        </CardContent>
+      </Card>
+
+      {viewingDoc && (
+        <DocumentViewerModal
+          doc={viewingDoc}
+          onClose={() => setViewingDoc(null)}
+          userProfile={userProfile}
+        />
+      )}
+    </div>
   )
 }
 
@@ -2069,15 +2713,63 @@ function agentIcon(status: AgentStatus) {
 function DocumentViewerModal({
   doc,
   onClose,
+  userProfile,
 }: {
   doc: OperationalDocument
   onClose: () => void
+  userProfile?: { role: string; department?: string; uid: string; email?: string; name?: string } | null
 }) {
   const [activeTab, setActiveTab] = React.useState<"preview" | "raw">("preview")
-  
+  const [isSubscribed, setIsSubscribed] = React.useState(false)
+
+  React.useEffect(() => {
+    if (userProfile && doc) {
+      checkDocumentSubscription(userProfile.uid, doc.id).then((subbed) => {
+        setIsSubscribed(subbed)
+      })
+    }
+  }, [userProfile, doc])
+
   const handleDownload = (format: "markdown" | "json") => {
+    if (doc.status === "UnderReview") return
     downloadDocument(doc, format)
   }
+
+  const handleNotifyToggle = async () => {
+    if (!userProfile) return
+    try {
+      if (isSubscribed) {
+        await unsubscribeFromDocumentNotifications(userProfile.uid, doc.id)
+        setIsSubscribed(false)
+        toast.success("Unsubscribed from notifications.")
+      } else {
+        await subscribeToDocumentNotifications(
+          userProfile.uid,
+          userProfile.email || "",
+          userProfile.name || "",
+          doc.id,
+          doc.collection,
+          doc.title
+        )
+        setIsSubscribed(true)
+        toast.success("You will be notified when this draft is completed.")
+      }
+    } catch (e) {
+      toast.error("Failed to update notification subscription.")
+    }
+  }
+
+  const handleStatusChange = async (newStatus: "Active" | "UnderReview") => {
+    try {
+      await updateDocumentStatusInFirestore(doc.collection, doc.id, newStatus)
+      toast.success(`Document status set to ${newStatus}`)
+    } catch (e) {
+      toast.error("Failed to update document status")
+    }
+  }
+
+  const showAdminControls = userProfile && ["Admin", "Approver", "Reviewer"].includes(userProfile.role)
+  const isUnderReview = doc.status === "UnderReview"
 
   const data = doc.rawData || {}
 
@@ -2384,11 +3076,22 @@ function DocumentViewerModal({
             <p className="text-xs text-muted-foreground mt-0.5">Document ID: {doc.id}</p>
           </div>
           <div className="flex items-center gap-2">
+            {isUnderReview && userProfile && (
+              <Button
+                onClick={handleNotifyToggle}
+                variant={isSubscribed ? "secondary" : "default"}
+                size="sm"
+                className="h-8 text-xs font-semibold gap-1.5 cursor-pointer"
+              >
+                {isSubscribed ? "Subscribed" : "Notify Me"}
+              </Button>
+            )}
             <Button
               onClick={() => handleDownload("markdown")}
               variant="outline"
               size="sm"
-              className="h-8 text-xs font-semibold gap-1.5 cursor-pointer hover:bg-accent"
+              disabled={isUnderReview}
+              className={`h-8 text-xs font-semibold gap-1.5 ${isUnderReview ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-accent"}`}
             >
               Download MD
             </Button>
@@ -2396,7 +3099,8 @@ function DocumentViewerModal({
               onClick={() => handleDownload("json")}
               variant="outline"
               size="sm"
-              className="h-8 text-xs font-semibold gap-1.5 cursor-pointer hover:bg-accent"
+              disabled={isUnderReview}
+              className={`h-8 text-xs font-semibold gap-1.5 ${isUnderReview ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-accent"}`}
             >
               Download JSON
             </Button>
@@ -2410,6 +3114,14 @@ function DocumentViewerModal({
             </Button>
           </div>
         </div>
+
+        {/* Under Review Banner */}
+        {isUnderReview && (
+          <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2 flex items-center gap-2 text-amber-600 shrink-0 text-xs font-medium">
+            <AlertTriangleIcon className="size-4 shrink-0 text-amber-500" />
+            <span>This document is currently under review. Downloads are locked. Click "Notify Me" to get notified when completed.</span>
+          </div>
+        )}
 
         {/* Tab Selection */}
         <div className="flex items-center border-b bg-muted/5 px-6 py-2 gap-2 shrink-0">
@@ -2433,6 +3145,33 @@ function DocumentViewerModal({
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6">
+          {showAdminControls && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-muted/30 border border-muted/50 rounded-lg p-3 mb-4 text-xs">
+              <div>
+                <span className="font-semibold text-muted-foreground uppercase tracking-wider block sm:inline mr-2">Admin Control:</span>
+                <span className="text-muted-foreground">Modify document status to test review & notification triggers.</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  variant={doc.status === "Active" ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-[10px] py-1 cursor-pointer"
+                  onClick={() => handleStatusChange("Active")}
+                >
+                  Active
+                </Button>
+                <Button
+                  variant={doc.status === "UnderReview" ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-[10px] py-1 cursor-pointer"
+                  onClick={() => handleStatusChange("UnderReview")}
+                >
+                  Under Review
+                </Button>
+              </div>
+            </div>
+          )}
+
           {activeTab === "preview" ? (
             <div className="space-y-4">
               {renderStructuredPreview()}
@@ -2492,5 +3231,123 @@ function DocumentViewerModal({
         </div>
       </div>
     </div>
+  )
+}
+
+function UserManagementPage() {
+  const [users, setUsers] = React.useState<any[]>([])
+  const [loading, setLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    const unsub = listenToAllUsers(
+      (data) => {
+        setUsers(data)
+        setLoading(false)
+      },
+      (err) => {
+        toast.error(`Failed to load users: ${err}`)
+        setLoading(false)
+      }
+    )
+    return () => unsub()
+  }, [])
+
+  const handleRoleChange = async (userId: string, currentDept: string, newRole: string) => {
+    try {
+      await updateUserRoleAndDepartment(userId, newRole, currentDept || "Operations")
+      toast.success("User role updated successfully")
+    } catch (e) {
+      toast.error("Failed to update user role")
+    }
+  }
+
+  const handleDepartmentChange = async (userId: string, currentRole: string, newDept: string) => {
+    try {
+      await updateUserRoleAndDepartment(userId, currentRole || "Viewer", newDept)
+      toast.success("User department updated successfully")
+    } catch (e) {
+      toast.error("Failed to update user department")
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <div className="text-sm text-muted-foreground">Loading registered users...</div>
+      </div>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>User Account Hierarchy & Departments</CardTitle>
+        <CardDescription>
+          View all registered user profiles. You can promote/demote roles and assign departments.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="rounded-xl border bg-card/50 overflow-hidden">
+          <Table>
+            <TableHeader className="bg-muted/30">
+              <TableRow>
+                <TableHead className="font-semibold">User Name</TableHead>
+                <TableHead className="font-semibold">Email Address</TableHead>
+                <TableHead className="font-semibold">Access Role</TableHead>
+                <TableHead className="font-semibold">Assigned Department</TableHead>
+                <TableHead className="font-semibold">Registration Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => {
+                const isNick = u.email === "nicklynch@bonusthoughts.com"
+                return (
+                  <TableRow key={u.uid} className="hover:bg-muted/10">
+                    <TableCell className="font-medium text-sm">{u.name}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{u.email}</TableCell>
+                    <TableCell>
+                      {isNick ? (
+                        <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-semibold py-0.5 px-2">
+                          Admin (Locked)
+                        </Badge>
+                      ) : (
+                        <select
+                          value={u.role || "Viewer"}
+                          onChange={(e) => handleRoleChange(u.uid, u.department, e.target.value)}
+                          className="rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer text-foreground font-medium"
+                        >
+                          <option value="Admin">Admin</option>
+                          <option value="Approver">Approver</option>
+                          <option value="Reviewer">Reviewer</option>
+                          <option value="Contributor">Contributor</option>
+                          <option value="Viewer">Viewer</option>
+                        </select>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <select
+                        value={u.department || "Operations"}
+                        disabled={isNick}
+                        onChange={(e) => handleDepartmentChange(u.uid, u.role, e.target.value)}
+                        className="rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer text-foreground font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <option value="Operations">Operations</option>
+                        <option value="IT">IT</option>
+                        <option value="Safety">Safety</option>
+                        <option value="Maintenance">Maintenance</option>
+                        <option value="Engineering">Engineering</option>
+                      </select>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground font-medium">
+                      {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

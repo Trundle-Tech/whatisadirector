@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if the user is signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper function to get the user's role from the users collection
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getUserRole() {
+      return getUserData().role;
+    }
+
+    // Helper function to check if the user is an Admin
+    function isAdmin() {
+      return isSignedIn() && getUserRole() == 'Admin';
+    }
+
+    // Helper function to check if the user is an Approver
+    function isApprover() {
+      return isSignedIn() && (getUserRole() == 'Approver' || getUserRole() == 'Admin');
+    }
+
+    // Helper function to check if the user is a Reviewer
+    function isReviewer() {
+      return isSignedIn() && (getUserRole() == 'Reviewer' || getUserRole() == 'Approver' || getUserRole() == 'Admin');
+    }
+
+    // Helper function to check if the user is a Contributor
+    function isContributor() {
+      return isSignedIn() && (getUserRole() == 'Contributor' || getUserRole() == 'Reviewer' || getUserRole() == 'Approver' || getUserRole() == 'Admin');
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      // Allow creation if they are authenticated and setting their own uid, OR if they are Admin.
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Only Admin or the user themselves can update their profile. Admins can update roles/departments.
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Ingestion Packages Collection
+    match /ingestionPackages/{packageId} {
+      allow read: if isSignedIn();
+      // Contributors can submit packages. Reviewers/Approvers/Admins can do everything.
+      allow create: if isContributor();
+      allow update: if isContributor();
+      allow delete: if isAdmin();
+    }
+
+    // Operational Collections (sops, mops, eops)
+    match /sops/{sopId} {
+      allow read: if isSignedIn();
+      allow write: if isApprover();
+    }
+
+    match /mops/{mopId} {
+      allow read: if isSignedIn();
+      allow write: if isApprover();
+    }
+
+    match /eops/{eopId} {
+      allow read: if isSignedIn();
+      allow write: if isApprover();
+    }
+
+    // Subscriptions Collection
+    match /subscriptions/{subId} {
+      // Users can read/write their own subscriptions.
+      allow read, write: if isSignedIn() && (
+        (resource == null && request.auth.uid == request.resource.data.userId) || 
+        (resource != null && request.auth.uid == resource.data.userId)
+      );
+    }
+
+    // Notifications Collection
+    match /notifications/{notifId} {
+      // Users can read/write their own notifications.
+      allow read, update, delete: if isSignedIn() && (request.auth.uid == resource.data.userId);
+      // Anyone signed in can create notifications (necessary for the trigger when status transitions)
+      allow create: if isSignedIn();
+    }
+  }
+}

@@ -9,7 +9,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth"
-import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore"
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore"
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -45,18 +45,31 @@ export async function signInWithGoogle() {
   return credential.user
 }
 
-export async function syncUserToFirestore(user: User) {
+export async function syncUserToFirestore(user: User, name?: string, department?: string) {
   const userDocRef = doc(db, "users", user.uid)
   const userSnap = await getDoc(userDocRef)
   if (!userSnap.exists()) {
+    const isNick = user.email === "nicklynch@bonusthoughts.com"
     await setDoc(userDocRef, {
       uid: user.uid,
       email: user.email,
-      name: user.displayName || user.email?.split("@")[0] || "New User",
-      role: "Admin", // default to Admin for live user setup
+      name: name || user.displayName || user.email?.split("@")[0] || "New User",
+      role: isNick ? "Admin" : "Viewer",
+      department: department || "Operations",
       createdAt: new Date().toISOString(),
     })
   }
+}
+
+export function listenToUserProfile(uid: string, callback: (profile: any) => void) {
+  const userDocRef = doc(db, "users", uid)
+  return onSnapshot(userDocRef, (docSnap) => {
+    if (docSnap.exists()) {
+      callback(docSnap.data())
+    } else {
+      callback(null)
+    }
+  })
 }
 
 export async function signOutOfFirebase() {

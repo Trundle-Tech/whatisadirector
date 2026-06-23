@@ -11,6 +11,9 @@ import {
   updateDoc,
   type DocumentData,
   type Unsubscribe,
+  getDocs,
+  where,
+  deleteDoc,
 } from "firebase/firestore"
 
 import { db, auth } from "@/lib/firebase"
@@ -26,6 +29,7 @@ export type AppRoute =
   | "mops"
   | "eops"
   | "login"
+  | "user-management"
 
 export type PackageStatus =
   | "Processing"
@@ -693,6 +697,13 @@ export async function publishPackageInFirestore(item: IngestionPackage) {
     updatedAt: serverTimestamp(),
     applicationLog: arrayUnion(`Document published to database collection ${collectionName} with ID: ${docId}`),
   })
+
+  // Trigger notifications for this document
+  try {
+    await triggerNotificationsForDocument(docId)
+  } catch (error) {
+    console.error("Failed to trigger notifications on publish:", error)
+  }
 }
 
 function reverseFormatLabel(label: string): string {
@@ -704,4 +715,158 @@ function reverseFormatLabel(label: string): string {
   
   const result = label.replace(/\s+/g, '');
   return result.charAt(0).toLowerCase() + result.slice(1);
+}
+
+// =========================================================================
+// Real-time Notifications & Permissions Helpers
+// =========================================================================
+
+export function listenToAllUsers(
+  onData: (users: any[]) => void,
+  onError: (message: string) => void
+): Unsubscribe {
+  const usersCollection = collection(db, "users")
+  const q = query(usersCollection, orderBy("createdAt", "desc"))
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      onData(snapshot.docs.map((doc) => doc.data()))
+    },
+    (error) => onError(error.message)
+  )
+}
+
+export async function updateUserRoleAndDepartment(
+  userId: string,
+  role: string,
+  department: string
+): Promise<void> {
+  const userDocRef = doc(db, "users", userId)
+  await updateDoc(userDocRef, {
+    role,
+    department,
+    updatedAt: new Date().toISOString()
+  })
+}
+
+export async function updateDocumentStatusInFirestore(
+  collectionName: string,
+  docId: string,
+  status: "Active" | "UnderReview" | "Draft"
+): Promise<void> {
+  const cleanCollection = collectionName.replace("/", "")
+  const docRef = doc(db, cleanCollection, docId)
+
+  await updateDoc(docRef, {
+    status,
+    updatedAt: new Date().toISOString()
+  })
+
+  if (status === "Active") {
+    await triggerNotificationsForDocument(docId)
+  }
+}
+
+export async function subscribeToDocumentNotifications(
+  userId: string,
+  userEmail: string,
+  userName: string,
+  docId: string,
+  docCollection: string,
+  docTitle: string
+): Promise<void> {
+  const q = query(
+    collection(db, "subscriptions"),
+    where("userId", "==", userId),
+    where("docId", "==", docId)
+  )
+  const snap = await getDocs(q)
+  if (snap.empty) {
+    const subDocRef = doc(collection(db, "subscriptions"))
+    await setDoc(subDocRef, {
+      id: subDocRef.id,
+      userId,
+      userEmail,
+      userName,
+      docId,
+      docCollection,
+      docTitle,
+      createdAt: new Date().toISOString()
+    })
+  }
+}
+
+export async function unsubscribeFromDocumentNotifications(userId: string, docId: string): Promise<void> {
+  const q = query(
+    collection(db, "subscriptions"),
+    where("userId", "==", userId),
+    where("docId", "==", docId)
+  )
+  const snap = await getDocs(q)
+  for (const subDoc of snap.docs) {
+    await deleteDoc(subDoc.ref)
+  }
+}
+
+export async function checkDocumentSubscription(userId: string, docId: string): Promise<boolean> {
+  const q = query(
+    collection(db, "subscriptions"),
+    where("userId", "==", userId),
+    where("docId", "==", docId)
+  )
+  const snap = await getDocs(q)
+  return !snap.empty
+}
+
+export function listenToUserNotifications(
+  userId: string,
+  onData: (notifications: any[]) => void,
+  onError: (message: string) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, "notifications"),
+    where("userId", "==", userId),
+    orderBy("createdAt", "desc")
+  )
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      onData(snapshot.docs.map((doc) => doc.data()))
+    },
+    (error) => onError(error.message)
+  )
+}
+
+export async function markNotificationAsRead(notificationId: string): Promise<void> {
+  const notifRef = doc(db, "notifications", notificationId)
+  await updateDoc(notifRef, {
+    read: true
+  })
+}
+
+export async function deleteNotification(notificationId: string): Promise<void> {
+  const notifRef = doc(db, "notifications", notificationId)
+  await deleteDoc(notifRef)
+}
+
+async function triggerNotificationsForDocument(
+  docId: string
+): Promise<void> {
+  const q = query(collection(db, "subscriptions"), where("docId", "==", docId))
+  const snap = await getDocs(q)
+  for (const subDoc of snap.docs) {
+    const subData = subDoc.data()
+    const notifRef = doc(collection(db, "notifications"))
+    await setDoc(notifRef, {
+      id: notifRef.id,
+      userId: subData.userId,
+      docId: subData.docId,
+      docCollection: subData.docCollection,
+      docTitle: subData.docTitle,
+      message: `The draft/review for "${subData.docTitle}" is now complete and active.`,
+      read: false,
+      createdAt: new Date().toISOString()
+    })
+    await deleteDoc(subDoc.ref)
+  }
 }

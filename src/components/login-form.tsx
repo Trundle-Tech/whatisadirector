@@ -23,7 +23,7 @@ export function LoginForm({
   error?: string
   isLoading?: boolean
   onSubmit: (credentials: { email: string; password: string }) => void
-  onSignUp?: (credentials: { email: string; password: string }) => void
+  onSignUp?: (credentials: { email: string; password: string; name: string; department: string }) => void
   onGoogleSignIn?: () => void
 }) {
   const [isSignUp, setIsSignUp] = React.useState(false)
@@ -38,12 +38,14 @@ export function LoginForm({
 
     if (isSignUp) {
       const confirmPassword = String(formData.get("confirmPassword") ?? "")
+      const fullName = String(formData.get("fullName") ?? "")
+      const department = String(formData.get("department") ?? "")
       if (password !== confirmPassword) {
         setLocalError("Passwords do not match")
         return
       }
       if (onSignUp) {
-        onSignUp({ email, password })
+        onSignUp({ email, password, name: fullName, department })
       }
     } else {
       onSubmit({ email, password })
@@ -100,16 +102,43 @@ export function LoginForm({
                 />
               </Field>
               {isSignUp && (
-                <Field>
-                  <FieldLabel htmlFor="confirmPassword">Confirm Password</FieldLabel>
-                  <Input
-                    name="confirmPassword"
-                    id="confirmPassword"
-                    type="password"
-                    autoComplete="new-password"
-                    required
-                  />
-                </Field>
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="fullName">Full Name</FieldLabel>
+                    <Input
+                      name="fullName"
+                      id="fullName"
+                      type="text"
+                      placeholder="John Doe"
+                      required
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="department">Department</FieldLabel>
+                    <select
+                      name="department"
+                      id="department"
+                      required
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="Operations">Operations</option>
+                      <option value="IT">IT</option>
+                      <option value="Safety">Safety</option>
+                      <option value="Maintenance">Maintenance</option>
+                      <option value="Engineering">Engineering</option>
+                    </select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="confirmPassword">Confirm Password</FieldLabel>
+                    <Input
+                      name="confirmPassword"
+                      id="confirmPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                    />
+                  </Field>
+                </>
               )}
               {activeError ? <FieldError>{activeError}</FieldError> : null}
               <Field>
