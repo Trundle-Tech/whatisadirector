@@ -5,8 +5,8 @@ This document records the database configuration and application registration fo
 ## Project Credentials
 
 * **Project Name**: whatisadirector
-* **Project ID**: whatisadirector
-* **Project Number**: 452588711956
+* **Project ID**: see `VITE_FIREBASE_PROJECT_ID` env var
+* **Project Number**: see `VITE_FIREBASE_MESSAGING_SENDER_ID` env var
 
 ## Database Status
 * **Status**: Stood Up
@@ -25,12 +25,12 @@ import { initializeApp } from "firebase/app";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyAhrZ_FxgfvYtFqeY7KoUUOYrUYYdfAna8",
-  authDomain: "whatisadirector.firebaseapp.com",
-  projectId: "whatisadirector",
-  storageBucket: "whatisadirector.firebasestorage.app",
-  messagingSenderId: "452588711956",
-  appId: "1:452588711956:web:0170dbf47be717da33f701"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase

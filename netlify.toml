@@ -5,6 +5,8 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # VITE_FIREBASE_PROJECT_ID is the GCP project name (not a secret) and appears throughout docs
+  SECRETS_SCAN_OMIT_KEYS = "VITE_FIREBASE_PROJECT_ID"
 
 # Serverless function endpoints are available under /api/* (e.g. /api/vertex)
 [[redirects]]

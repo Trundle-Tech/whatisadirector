@@ -2,12 +2,6 @@
 
 An Electron desktop application built on a modern frontend stack using React, TypeScript, Vite, Tailwind CSS, and `shadcn/ui`.
 
-## Project Information
-* **Project Name**: whatisadirector
-* **Project ID**: whatisadirector
-* **Project Number**: 452588711956
-
----
 
 ## Quick Start Guide
 
@@ -121,3 +115,4 @@ The ingestion tool is the primary path for creating and updating all operational
 3. One approval covers everything in a package — primary document + all impacted document changes — atomically.
 4. The Application Step is a Firestore transaction. If any part fails, the whole transaction rolls back.
 5. See [ingestion_pipeline.md](file:///Users/nicklynch/Desktop/whatisadirector/ideas_docs/ingestion_pipeline.md) for agent behavior and [integration_guide.md](file:///Users/nicklynch/Desktop/whatisadirector/ideas_docs/integration_guide.md) for UI states and wiring before building any ingestion feature.
+# whatisadirector

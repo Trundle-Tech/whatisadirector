@@ -20,6 +20,9 @@ yarn-debug.log*
 yarn-error.log*
 *.log
 
+# Vite
+vite.config.ts.timestamp-*
+
 # Editor / OS
 .DS_Store
 .vscode/
